@@ -134,23 +134,28 @@ const FilterGroup = {
                 class="flex-shrink-0 text-xs border border-gray-300 rounded px-2 py-1.5 bg-white">
                 <option v-for="op in operators" :value="op.value" :key="op.value">{{ op.label }}</option>
               </select>
-              <label v-if="!opMeta(child.operator).noValue" class="flex items-center gap-1 text-[11px] text-gray-400 cursor-pointer flex-shrink-0" title="Wiele wartości (jedna na linię)">
-                <input type="checkbox" v-model="child.multiline" class="rounded border-gray-300 text-blue-600 w-3 h-3">
-                multi
-              </label>
-              <input v-if="!opMeta(child.operator).noValue && !child.multiline"
+              <button v-if="!opMeta(child.operator).noValue" type="button"
+                @click="child.multiline = !child.multiline"
+                class="flex-shrink-0 p-1 rounded transition"
+                :class="child.multiline ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:text-gray-600'"
+                :title="child.multiline ? 'Wiele wartości (włączone)' : 'Wiele wartości (jedna na linię)'">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
+              </button>
+            </div>
+            <div v-if="!opMeta(child.operator).noValue">
+              <input v-if="!child.multiline"
                 v-model="child.value"
                 :placeholder="opMeta(child.operator).mono ? 'wyrażenie...' : 'wartość...'"
-                class="flex-1 min-w-0 text-xs border border-gray-300 rounded px-2 py-1.5"
+                class="w-full text-xs border border-gray-300 rounded px-2 py-1.5"
                 :class="opMeta(child.operator).mono ? 'font-mono bg-white' : ''">
-            </div>
-            <div v-if="!opMeta(child.operator).noValue && child.multiline">
-              <textarea v-model="child.value" @input="trimMultiline(child)" rows="3" placeholder="jedna wartość na linię…"
-                class="w-full text-xs border border-gray-300 rounded px-2 py-1.5 font-mono resize-y"></textarea>
-              <p class="text-[10px] mt-1" :class="multilineCount(child.value) >= maxMultiline ? 'text-amber-600' : 'text-gray-400'">
-                {{ multilineCount(child.value) }} / {{ maxMultiline }}
-                <span v-if="multilineCount(child.value) >= maxMultiline">— przycięto</span>
-              </p>
+              <template v-else>
+                <textarea v-model="child.value" @input="trimMultiline(child)" rows="3" placeholder="jedna wartość na linię…"
+                  class="w-full text-xs border border-gray-300 rounded px-2 py-1.5 font-mono resize-y"></textarea>
+                <p class="text-[10px] mt-1" :class="multilineCount(child.value) >= maxMultiline ? 'text-amber-600' : 'text-gray-400'">
+                  {{ multilineCount(child.value) }} / {{ maxMultiline }}
+                  <span v-if="multilineCount(child.value) >= maxMultiline">— przycięto</span>
+                </p>
+              </template>
             </div>
           </div>
           <filter-group v-else :node="child" :fields="fields" :operators="operators"
