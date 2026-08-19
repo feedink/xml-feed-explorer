@@ -11,6 +11,17 @@ function _ensureNodeIds(node) {
   if (!node._id) node._id = _nextNodeId++;
   if (node.children) node.children.forEach(_ensureNodeIds);
 }
+function _collectInvalidIds(node, operators, out) {
+  if (node.type === 'condition') {
+    if (!node.field) { out.push(node._id); return; }
+    const op = operators.find(o => o.value === node.operator);
+    if (op && !op.noValue && (!node.value || !node.value.trim())) out.push(node._id);
+    return;
+  }
+  const children = node.children || [];
+  if (!children.length) { out.push(node._id); return; }
+  for (const child of children) _collectInvalidIds(child, operators, out);
+}
 function _cloneNode(node) {
   const clone = JSON.parse(JSON.stringify(node));
   (function reassign(n) { n._id = _nextNodeId++; if (n.children) n.children.forEach(reassign); })(clone);
@@ -26,6 +37,7 @@ const FilterGroup = {
     fields:    { type: Array,  default: () => [] },
     operators: { type: Array,  default: () => [] },
     depth:     { type: Number, default: 0 },
+    invalidIds: { default: () => new Set() },
   },
   emits: ['remove', 'duplicate'],
   data() {
@@ -66,7 +78,8 @@ const FilterGroup = {
     },
   },
   template: `
-    <div class="rounded-lg border" :class="depth===0 ? 'border-blue-200' : 'border-gray-200'">
+    <div class="rounded-lg border" :data-filter-id="node._id"
+      :class="depth===0 ? 'border-blue-200' : (invalidIds.has(node._id) ? 'border-red-400 bg-red-50' : 'border-gray-200')">
       <div class="flex items-center gap-2 px-3 py-2 rounded-t-lg border-b"
            :class="depth===0 ? 'bg-blue-50 border-blue-100' : 'bg-gray-50 border-gray-100'">
         <span class="text-xs text-gray-500 font-medium">Dopasuj</span>
@@ -86,7 +99,9 @@ const FilterGroup = {
       </div>
       <div class="p-2 space-y-2">
         <template v-for="(child, idx) in node.children" :key="child._id">
-          <div v-if="child.type==='condition'" class="bg-gray-50 border border-gray-200 rounded-lg p-2 space-y-1.5">
+          <div v-if="child.type==='condition'" :data-filter-id="child._id"
+            class="rounded-lg p-2 space-y-1.5 border"
+            :class="invalidIds.has(child._id) ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-gray-50'">
             <div class="flex items-center gap-1.5">
 
               <!-- Field picker (searchable combobox) -->
@@ -134,13 +149,14 @@ const FilterGroup = {
                 class="flex-shrink-0 text-xs border border-gray-300 rounded px-2 py-1.5 bg-white">
                 <option v-for="op in operators" :value="op.value" :key="op.value">{{ op.label }}</option>
               </select>
-              <button v-if="!opMeta(child.operator).noValue" type="button"
-                @click="child.multiline = !child.multiline"
-                class="flex-shrink-0 p-1 rounded transition"
-                :class="child.multiline ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:text-gray-600'"
-                :title="child.multiline ? 'Wiele wartości (włączone)' : 'Wiele wartości (jedna na linię)'">
-                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
-              </button>
+              <template v-if="!opMeta(child.operator).noValue">
+                <button v-for="t in ['wartość','lista']" :key="t" type="button"
+                  @click="child.multiline = t==='lista'"
+                  class="px-2 py-0.5 text-[11px] font-medium rounded transition"
+                  :class="(t==='lista') === !!child.multiline
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-white border border-gray-300 text-gray-500 hover:bg-gray-50'">{{ t }}</button>
+              </template>
             </div>
             <div v-if="!opMeta(child.operator).noValue">
               <input v-if="!child.multiline"
@@ -159,7 +175,7 @@ const FilterGroup = {
             </div>
           </div>
           <filter-group v-else :node="child" :fields="fields" :operators="operators"
-            :depth="depth+1" @remove="remove(idx)" @duplicate="duplicate(idx)" />
+            :depth="depth+1" :invalid-ids="invalidIds" @remove="remove(idx)" @duplicate="duplicate(idx)" />
         </template>
         <div class="flex gap-2 pt-0.5">
           <button @click="addCondition"
@@ -224,6 +240,8 @@ const app = createApp({
 
       // Filter
       filterRoot:     _newGroup('AND'),
+      filterInvalidIds:    new Set(),
+      filterValidationActive: false,
       savedFilters:   [],
       showSaveFilter: false,
       saveFilterName: '',
@@ -265,6 +283,19 @@ const app = createApp({
       // Quick search within loaded results
       quickSearch: '',
     };
+  },
+
+  watch: {
+    filterRoot: {
+      deep: true,
+      handler() {
+        if (!this.filterValidationActive) return;
+        const ids = [];
+        _collectInvalidIds(this.filterRoot, CONFIG.operators, ids);
+        this.filterInvalidIds = new Set(ids);
+        if (!ids.length) this.filterValidationActive = false;
+      },
+    },
   },
 
   computed: {
@@ -892,6 +923,22 @@ const app = createApp({
     async applyFilter() {
       if (!this.activeProject) return;
       if (this.fullExporting) this.cancelFullExport();
+      // Validate filter tree
+      if (this.hasFilter) {
+        const ids = [];
+        _collectInvalidIds(this.filterRoot, CONFIG.operators, ids);
+        if (ids.length) {
+          this.filterInvalidIds = new Set(ids);
+          this.filterValidationActive = true;
+          this.$nextTick(() => {
+            const el = document.querySelector('[data-filter-id="' + ids[0] + '"]');
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          });
+          return;
+        }
+      }
+      this.filterInvalidIds = new Set();
+      this.filterValidationActive = false;
       // Persist filter immediately
       const update = toRaw(this.activeProject);
       update.lastFilter = this.hasFilter ? JSON.parse(JSON.stringify(this.filterRoot)) : null;
@@ -940,6 +987,8 @@ const app = createApp({
     async clearFilter() {
       this.filterRoot  = _newGroup('AND');
       this.quickSearch = '';
+      this.filterInvalidIds = new Set();
+      this.filterValidationActive = false;
       if (this.fullExporting) this.cancelFullExport();
       if (!this.activeProject) return;
       if (this._isIdbMode(this.activeProject)) {
