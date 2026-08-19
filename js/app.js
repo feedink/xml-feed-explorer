@@ -11,6 +11,11 @@ function _ensureNodeIds(node) {
   if (!node._id) node._id = _nextNodeId++;
   if (node.children) node.children.forEach(_ensureNodeIds);
 }
+function _cloneNode(node) {
+  const clone = JSON.parse(JSON.stringify(node));
+  (function reassign(n) { n._id = _nextNodeId++; if (n.children) n.children.forEach(reassign); })(clone);
+  return clone;
+}
 
 // ── FilterGroup component ─────────────────────────────────────────────────────
 
@@ -22,18 +27,30 @@ const FilterGroup = {
     operators: { type: Array,  default: () => [] },
     depth:     { type: Number, default: 0 },
   },
-  emits: ['remove'],
+  emits: ['remove', 'duplicate'],
   data() {
     return {
       fieldSearch:  {},  // idx → search string
       fieldDropOpen: {}, // idx → boolean
+      maxMultiline: CONFIG.maxMultilineValues,
     };
   },
   methods: {
     addCondition() { this.node.children.push(_newCondition()); },
     addGroup()     { this.node.children.push(_newGroup('AND')); },
     remove(idx)    { this.node.children.splice(idx, 1); },
+    duplicate(idx) { this.node.children.splice(idx + 1, 0, _cloneNode(this.node.children[idx])); },
     opMeta(op)     { return this.operators.find(o => o.value === op) || {}; },
+    multilineCount(v) { return (v || '').split('\n').filter(l => l.trim()).length; },
+    trimMultiline(child) {
+      if (!child.value) return;
+      const lines = child.value.split('\n');
+      let count = 0, cutAt = -1;
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].trim()) { count++; if (count > this.maxMultiline) { cutAt = i; break; } }
+      }
+      if (cutAt !== -1) child.value = lines.slice(0, cutAt).join('\n');
+    },
     openDrop(idx)  {
       this.fieldSearch[idx] = ''; this.fieldDropOpen[idx] = true;
       this.$nextTick(() => {
@@ -58,8 +75,12 @@ const FilterGroup = {
           :class="node.type===t
             ? (t==='AND' ? 'bg-blue-600 text-white' : 'bg-orange-500 text-white')
             : 'bg-white border border-gray-300 text-gray-500 hover:bg-gray-50'">{{ t }}</button>
+        <button v-if="depth>0" @click="$emit('duplicate')" title="Duplikuj grupę"
+          class="ml-auto text-gray-400 hover:text-blue-500 transition p-0.5">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+        </button>
         <button v-if="depth>0" @click="$emit('remove')"
-          class="ml-auto text-gray-400 hover:text-red-500 transition p-0.5">
+          class="text-gray-400 hover:text-red-500 transition p-0.5">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
@@ -99,6 +120,10 @@ const FilterGroup = {
                 </div>
               </div>
 
+              <button @click="duplicate(idx)" title="Duplikuj warunek"
+                class="flex-shrink-0 text-gray-400 hover:text-blue-500 transition p-0.5">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+              </button>
               <button @click="remove(idx)" title="Usuń warunek"
                 class="flex-shrink-0 text-gray-400 hover:text-red-500 transition p-0.5">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -109,15 +134,27 @@ const FilterGroup = {
                 class="flex-shrink-0 text-xs border border-gray-300 rounded px-2 py-1.5 bg-white">
                 <option v-for="op in operators" :value="op.value" :key="op.value">{{ op.label }}</option>
               </select>
-              <input v-if="!opMeta(child.operator).noValue"
+              <label v-if="!opMeta(child.operator).noValue" class="flex items-center gap-1 text-[11px] text-gray-400 cursor-pointer flex-shrink-0" title="Wiele wartości (jedna na linię)">
+                <input type="checkbox" v-model="child.multiline" class="rounded border-gray-300 text-blue-600 w-3 h-3">
+                multi
+              </label>
+              <input v-if="!opMeta(child.operator).noValue && !child.multiline"
                 v-model="child.value"
                 :placeholder="opMeta(child.operator).mono ? 'wyrażenie...' : 'wartość...'"
                 class="flex-1 min-w-0 text-xs border border-gray-300 rounded px-2 py-1.5"
                 :class="opMeta(child.operator).mono ? 'font-mono bg-white' : ''">
             </div>
+            <div v-if="!opMeta(child.operator).noValue && child.multiline">
+              <textarea v-model="child.value" @input="trimMultiline(child)" rows="3" placeholder="jedna wartość na linię…"
+                class="w-full text-xs border border-gray-300 rounded px-2 py-1.5 font-mono resize-y"></textarea>
+              <p class="text-[10px] mt-1" :class="multilineCount(child.value) >= maxMultiline ? 'text-amber-600' : 'text-gray-400'">
+                {{ multilineCount(child.value) }} / {{ maxMultiline }}
+                <span v-if="multilineCount(child.value) >= maxMultiline">— przycięto</span>
+              </p>
+            </div>
           </div>
           <filter-group v-else :node="child" :fields="fields" :operators="operators"
-            :depth="depth+1" @remove="remove(idx)" />
+            :depth="depth+1" @remove="remove(idx)" @duplicate="duplicate(idx)" />
         </template>
         <div class="flex gap-2 pt-0.5">
           <button @click="addCondition"
@@ -141,6 +178,8 @@ const app = createApp({
   data() {
     return {
       config: CONFIG,
+      changelog: typeof CHANGELOG !== 'undefined' ? CHANGELOG : [],
+      showChangelog: false,
       screen: 'list',  // 'list' | 'import' | 'project'
 
       // List
@@ -204,6 +243,8 @@ const app = createApp({
       filterStartTime: 0,
       filterElapsed:   0,
       _filterTimer:    null,
+      fullExporting:      false,
+      fullExportProgress: 0,
       page:            1,
 
       // Table
@@ -292,6 +333,8 @@ const app = createApp({
     async goToList() {
       if (this._worker) { this._worker.terminate(); this._worker = null; }
       if (this._workerUrl) { URL.revokeObjectURL(this._workerUrl); this._workerUrl = null; }
+      if (this._filterSignal) { this._filterSignal.cancelled = true; this._filterSignal = null; }
+      this.fullExporting = false;
       if (this.activeProject) {
         if (this._isIdbMode(this.activeProject)) {
           this._lastIdbProjectId = this.activeProject.id;
@@ -843,6 +886,7 @@ const app = createApp({
 
     async applyFilter() {
       if (!this.activeProject) return;
+      if (this.fullExporting) this.cancelFullExport();
       // Persist filter immediately
       const update = toRaw(this.activeProject);
       update.lastFilter = this.hasFilter ? JSON.parse(JSON.stringify(this.filterRoot)) : null;
@@ -891,6 +935,7 @@ const app = createApp({
     async clearFilter() {
       this.filterRoot  = _newGroup('AND');
       this.quickSearch = '';
+      if (this.fullExporting) this.cancelFullExport();
       if (!this.activeProject) return;
       if (this._isIdbMode(this.activeProject)) {
         try {
@@ -1017,17 +1062,103 @@ const app = createApp({
     },
 
     // ── export ────────────────────────────────────────────────────────────────
-    doExportXml() {
-      const schema = this._getSchema(this.activeProject);
-      exportXml(this.filterResults, schema?.itemTags?.[0] || 'item', schema?.nestedSeparator || '.');
+    async doExportXml() {
+      if (this.filterMatchedTotal > this.filterResults.length) {
+        await this._fullExport('xml');
+      } else {
+        const schema = this._getSchema(this.activeProject);
+        exportXml(this.filterResults, schema?.itemTags?.[0] || 'item', schema?.nestedSeparator || '.');
+      }
     },
-    doExportXlsx() {
-      exportXlsx(this.filterResults, this.visibleFields);
+    async doExportXlsx() {
+      if (this.filterMatchedTotal > this.filterResults.length) {
+        await this._fullExport('xlsx');
+      } else {
+        exportXlsx(this.filterResults, this.visibleFields);
+      }
     },
     doExportItemXml() {
       if (!this.selectedItem) return;
       const schema = this._getSchema(this.activeProject);
       exportXml([this.selectedItem], schema?.itemTags?.[0] || 'item', schema?.nestedSeparator || '.');
+    },
+
+    async _fullExport(format) {
+      this.fullExporting = true;
+      this.fullExportProgress = 0;
+      try {
+        const items = this._isIdbMode(this.activeProject)
+          ? await this._fullExportIdb()
+          : await this._fullExportStream();
+        if (!items) return;
+        const schema = this._getSchema(this.activeProject);
+        if (format === 'xml') {
+          exportXml(items, schema?.itemTags?.[0] || 'item', schema?.nestedSeparator || '.');
+        } else {
+          exportXlsx(items, this.visibleFields);
+        }
+      } catch (e) {
+        this.projectError = e.message || 'Błąd eksportu.';
+      } finally {
+        this.fullExporting = false;
+      }
+    },
+
+    async _fullExportIdb() {
+      const tree = this.hasFilter ? JSON.parse(JSON.stringify(this.filterRoot)) : null;
+      const filterFn = tree ? (item) => evaluateFilter(item, tree) : () => true;
+      this._filterSignal = { cancelled: false };
+      const items = await filterItems(
+        this.activeProject.id, filterFn,
+        (n) => { this.fullExportProgress = n; },
+        this._filterSignal
+      );
+      if (this._filterSignal.cancelled) return null;
+      this._filterSignal = null;
+      return items;
+    },
+
+    async _fullExportStream() {
+      const file = await this._getFile(this.activeProject);
+      if (!file) { this.fileNeeded = true; return null; }
+      const schema = JSON.parse(JSON.stringify(this._getSchema(this.activeProject)));
+      const filter = this.hasFilter ? JSON.parse(JSON.stringify(this.filterRoot)) : null;
+      return new Promise((resolve, reject) => {
+        const items = [];
+        const worker = this._createWorker();
+        worker.onerror = (e) => {
+          this._worker = null;
+          URL.revokeObjectURL(this._workerUrl); this._workerUrl = null;
+          reject(new Error(e.message || 'Błąd workera'));
+        };
+        worker.onmessage = ({ data }) => {
+          if (data.type === 'progress') {
+            this.fullExportProgress = data.count;
+          } else if (data.type === 'batch') {
+            items.push(...data.items);
+          } else if (data.type === 'done') {
+            this._worker = null;
+            URL.revokeObjectURL(this._workerUrl); this._workerUrl = null;
+            resolve(items);
+          } else if (data.type === 'error') {
+            this._worker = null;
+            URL.revokeObjectURL(this._workerUrl); this._workerUrl = null;
+            reject(new Error(data.message));
+          }
+        };
+        this._postWorker(worker, {
+          file, schema,
+          config: { chunkSize: CONFIG.chunkSize, batchSize: CONFIG.workerBatchSize },
+          filter, limit: null, resultLimit: null,
+        });
+      });
+    },
+
+    cancelFullExport() {
+      if (this._worker) { this._worker.terminate(); this._worker = null; }
+      if (this._workerUrl) { URL.revokeObjectURL(this._workerUrl); this._workerUrl = null; }
+      if (this._filterSignal) { this._filterSignal.cancelled = true; this._filterSignal = null; }
+      this.fullExporting = false;
     },
 
     // ── IDB / stream mode ─────────────────────────────────────────────────────

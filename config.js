@@ -1,5 +1,5 @@
 const CONFIG = {
-  version: '1.6',
+  version: '1.7',
   date: '19.08.2026',
 
   pageSize: 50,
@@ -8,6 +8,7 @@ const CONFIG = {
   maxFilterResults: 250000,
   workerBatchSize: 500,
   chunkSize: 4 * 1024 * 1024, // 4 MB
+  maxMultilineValues: 500,
 
   operators: [
     { value: 'contains',     label: 'zawiera',        noValue: false, mono: false },

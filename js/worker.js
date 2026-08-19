@@ -86,7 +86,18 @@ function _extractNumber(s) {
   return isNaN(n) ? null : n;
 }
 
-function _testCondition(item, { field, operator, value }) {
+function _testCondition(item, { field, operator, value, multiline }) {
+  if (multiline && value) {
+    let lines = value.split('\n').map(l => l.trim()).filter(l => l);
+    if (lines.length > 500) lines = lines.slice(0, 500);
+    if (lines.length > 1) {
+      const neg = operator === 'not_contains' || operator === 'not_equals' || operator === 'neq_num';
+      return neg
+        ? lines.every(line => _testCondition(item, { field, operator, value: line }))
+        : lines.some(line => _testCondition(item, { field, operator, value: line }));
+    }
+  }
+
   let raw = item[field];
   if (raw === undefined || raw === null) raw = '';
   const values = Array.isArray(raw) ? raw.map(String) : [String(raw)];

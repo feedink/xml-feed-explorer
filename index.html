@@ -37,7 +37,7 @@
         @blur="commitRename"
         class="font-semibold text-sm text-gray-700 border border-blue-400 rounded px-1.5 py-0 focus:outline-none w-48 max-w-xs">
     </template>
-    <span class="ml-auto text-xs text-gray-400">v{{ config.version }} <span class="text-gray-300">·</span> {{ config.date }}</span>
+    <button @click="showChangelog=true" class="ml-auto text-xs text-gray-400 hover:text-blue-500 transition" title="Historia zmian">v{{ config.version }} <span class="text-gray-300">·</span> {{ config.date }}</button>
   </header>
 
   <!-- ════════════════════════════════════════════════════════════════════════ -->
@@ -441,16 +441,25 @@
               </div>
             </div>
             <!-- Export -->
-            <button @click="doExportXml" :disabled="!filterResults.length || indexing" title="Eksportuj do XML"
-              class="text-xs px-3 py-1.5 border border-gray-300 rounded-lg bg-white text-gray-600 hover:bg-gray-50 transition disabled:opacity-40 flex items-center gap-1">
-              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-              XML
-            </button>
-            <button @click="doExportXlsx" :disabled="!filterResults.length || indexing" title="Eksportuj do XLSX"
-              class="text-xs px-3 py-1.5 border border-gray-300 rounded-lg bg-white text-gray-600 hover:bg-gray-50 transition disabled:opacity-40 flex items-center gap-1">
-              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-              XLSX
-            </button>
+            <template v-if="fullExporting">
+              <div class="flex items-center gap-2 text-xs text-gray-500">
+                <svg class="w-3.5 h-3.5 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                <span class="tabular-nums">Eksport… {{ fullExportProgress.toLocaleString('pl-PL') }}</span>
+                <button @click="cancelFullExport" class="text-xs text-red-500 hover:text-red-700 transition">Anuluj</button>
+              </div>
+            </template>
+            <template v-else>
+              <button @click="doExportXml" :disabled="!filterResults.length || indexing" title="Eksportuj do XML"
+                class="text-xs px-3 py-1.5 border border-gray-300 rounded-lg bg-white text-gray-600 hover:bg-gray-50 transition disabled:opacity-40 flex items-center gap-1">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                XML<span v-if="filterMatchedTotal > filterResults.length" class="text-[10px] text-blue-600 ml-0.5">pełny</span>
+              </button>
+              <button @click="doExportXlsx" :disabled="!filterResults.length || indexing" title="Eksportuj do XLSX"
+                class="text-xs px-3 py-1.5 border border-gray-300 rounded-lg bg-white text-gray-600 hover:bg-gray-50 transition disabled:opacity-40 flex items-center gap-1">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                XLSX<span v-if="filterMatchedTotal > filterResults.length" class="text-[10px] text-blue-600 ml-0.5">pełny</span>
+              </button>
+            </template>
           </div>
         </div>
 
@@ -589,6 +598,29 @@
     </div>
   </div>
 
+  <!-- Changelog modal -->
+  <div v-if="showChangelog" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+    <div class="bg-white rounded-xl shadow-xl p-6 w-96 max-h-[80vh] flex flex-col">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-bold text-gray-800">Historia zmian</h3>
+        <button @click="showChangelog=false" class="text-gray-400 hover:text-gray-600 transition">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="flex-1 overflow-y-auto space-y-4">
+        <div v-for="entry in changelog" :key="entry.version">
+          <p class="text-sm font-semibold text-gray-700">v{{ entry.version }} <span class="font-normal text-gray-400 text-xs">· {{ entry.date }}</span></p>
+          <ul class="mt-1 space-y-0.5">
+            <li v-for="(change, i) in entry.changes" :key="i" class="text-xs text-gray-600 flex gap-1.5">
+              <span class="text-gray-300 flex-shrink-0">·</span>
+              {{ change }}
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Delete all confirm modal -->
   <div v-if="confirmDeleteAll" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
     <div class="bg-white rounded-xl shadow-xl p-6 w-80">
@@ -630,7 +662,7 @@ async function _detectTags(file){
   self.postMessage({type:'done',candidates});
 }
 function _extractNumber(s){const m=String(s).replace(/\s/g,'').match(/-?\d[\d.,]*/);if(!m)return null;let raw=m[0];const ld=raw.lastIndexOf('.');const lc=raw.lastIndexOf(',');if(ld>-1&&lc>-1){if(lc>ld){raw=raw.replace(/\./g,'').replace(',','.');}else{raw=raw.replace(/,/g,'');}}else if(lc>-1){if((raw.match(/,/g)||[]).length===1){raw=raw.replace(',','.');}else{raw=raw.replace(/,/g,'');}}else if((raw.match(/\./g)||[]).length>1){raw=raw.replace(/\./g,'');}const n=parseFloat(raw);return isNaN(n)?null:n;}
-function _testCondition(item,{field,operator,value}){let raw=item[field];if(raw===undefined||raw===null)raw='';const values=Array.isArray(raw)?raw.map(String):[String(raw)];
+function _testCondition(item,{field,operator,value,multiline}){if(multiline&&value){let ln=value.split('\n').map(l=>l.trim()).filter(l=>l);if(ln.length>500)ln=ln.slice(0,500);if(ln.length>1){const neg=operator==='not_contains'||operator==='not_equals'||operator==='neq_num';return neg?ln.every(l=>_testCondition(item,{field,operator,value:l})):ln.some(l=>_testCondition(item,{field,operator,value:l}));}}let raw=item[field];if(raw===undefined||raw===null)raw='';const values=Array.isArray(raw)?raw.map(String):[String(raw)];
   if(operator==='is_empty')return values.every(v=>v.trim()==='');
   if(operator==='is_not_empty')return values.some(v=>v.trim()!=='');
   if(operator==='regex'){try{const re=new RegExp(value,'i');return values.some(v=>re.test(v));}catch{return false;}}
@@ -682,6 +714,7 @@ function _setField(obj,key,value){if(obj[key]===undefined)obj[key]=value;else if
 <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script src="config.js"></script>
+<script src="changelog.js"></script>
 <script src="js/schemas.js"></script>
 <script src="js/db.js"></script>
 <script src="js/filter.js"></script>
