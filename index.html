@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Feed Manager</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    [v-cloak] { display: none; }
+    .tbl-scroll { overflow-y: auto; }
+    .detail-scroll { overflow-y: auto; }
+  </style>
+</head>
+<body class="bg-gray-100 h-screen flex flex-col text-sm antialiased">
+<div id="app" v-cloak class="flex flex-col h-full">
+
+  <!-- ── Header ───────────────────────────────────────────────────────────── -->
+  <header class="bg-white border-b border-gray-200 px-5 py-3 flex items-center gap-3 flex-shrink-0 shadow-sm">
+    <button v-if="screen !== 'list'" @click="goToList"
+      class="text-gray-400 hover:text-gray-600 transition mr-1">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+    </button>
+    <svg class="w-5 h-5 text-blue-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+    <span class="font-bold text-gray-800">Feed Manager</span>
+    <span v-if="activeProject" class="text-gray-400">/</span>
+    <template v-if="activeProject">
+      <template v-if="!renamingProject">
+        <span class="font-semibold text-gray-700 truncate max-w-xs">{{ activeProject.name }}</span>
+        <button @click="startRename" title="Zmień nazwę projektu"
+          class="text-gray-400 hover:text-gray-600 transition flex-shrink-0">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+        </button>
+      </template>
+      <input v-else ref="renameInput" v-model="renameValue"
+        @keydown.enter.prevent="commitRename"
+        @keydown.escape="cancelRename"
+        @blur="commitRename"
+        class="font-semibold text-sm text-gray-700 border border-blue-400 rounded px-1.5 py-0 focus:outline-none w-48 max-w-xs">
+    </template>
+    <span class="ml-auto text-xs text-gray-400">v{{ config.version }} <span class="text-gray-300">·</span> {{ config.date }}</span>
+  </header>
+
+  <!-- ════════════════════════════════════════════════════════════════════════ -->
+  <!-- Screen: LIST                                                            -->
+  <!-- ════════════════════════════════════════════════════════════════════════ -->
+  <div v-if="screen==='list'" class="flex-1 overflow-y-auto">
+    <div class="max-w-6xl mx-auto p-6">
+
+      <div class="flex items-center justify-between mb-5">
+        <h2 class="text-lg font-bold text-gray-800">Projekty</h2>
+        <div class="flex items-center gap-3 ml-auto">
+          <div class="relative">
+            <svg class="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            <input v-model="projectSearch" @input="projectPage=1" placeholder="Szukaj projektu..." type="text"
+              class="pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:border-blue-400 w-52">
+          </div>
+          <button @click="startNewImport"
+            class="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition shadow-sm">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+            Nowy projekt
+          </button>
+          <button v-if="projects.length" @click="confirmDeleteAll=true" title="Usuń wszystkie dane"
+            class="p-2 text-gray-400 hover:text-red-500 transition">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Empty state -->
+      <div v-if="!projects.length" class="text-center py-20 text-gray-400">
+        <svg class="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        <p class="text-base">Brak projektów</p>
+        <p class="text-xs mt-1">Utwórz nowy projekt aby wczytać feed XML</p>
+      </div>
+
+      <!-- Projects table -->
+      <div v-else class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
+        <table class="w-full text-sm border-collapse table-fixed">
+          <colgroup>
+            <col class="w-auto">
+            <col class="w-36">
+            <col class="w-28">
+            <col class="w-44">
+            <col class="w-44">
+          </colgroup>
+          <thead>
+            <tr class="border-b border-gray-200 bg-gray-50">
+              <th class="text-left px-4 py-2.5 text-xs font-medium text-gray-500 uppercase tracking-wide">Nazwa</th>
+              <th class="text-right px-4 py-2.5 text-xs font-medium text-gray-500 uppercase tracking-wide">Rekordów</th>
+              <th class="text-right px-4 py-2.5 text-xs font-medium text-gray-500 uppercase tracking-wide">Rozmiar</th>
+              <th class="text-right px-4 py-2.5 text-xs font-medium text-gray-500 uppercase tracking-wide">Zaktualizowano</th>
+              <th class="px-4 py-2.5"></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            <tr v-if="!pagedProjects.length">
+              <td colspan="5" class="px-4 py-8 text-center text-gray-400 text-sm">Brak projektów pasujących do wyszukiwania</td>
+            </tr>
+            <tr v-for="p in pagedProjects" :key="p.id"
+              class="hover:bg-blue-50 transition cursor-pointer group">
+              <td class="px-4 py-3" @click="openProject(p)">
+                <p class="font-semibold text-gray-800">
+                  {{ p.name }}
+                  <span v-if="p.skipped" class="ml-2 text-xs font-normal text-amber-500">⚠ {{ p.skipped }} pominięte</span>
+                </p>
+                <p class="text-xs text-gray-400 mt-0.5 flex items-center gap-1.5">
+                  {{ p.filename }}
+                  <span v-if="p.fileSize < config.idbSizeLimit"
+                    class="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-700" title="Plik wczytywany do IndexedDB (tryb szybki)">⚡ IDB</span>
+                  <span v-else
+                    class="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-700" title="Plik strumieniowany z dysku (plik ≥ 1 GB)">≫ Stream</span>
+                </p>
+              </td>
+              <td class="px-4 py-3 text-right tabular-nums text-gray-700 whitespace-nowrap" @click="openProject(p)">{{ (p.itemCount||0).toLocaleString('pl-PL') }}</td>
+              <td class="px-4 py-3 text-right tabular-nums text-xs text-gray-400 whitespace-nowrap" @click="openProject(p)">{{ fmtSize(p.fileSize) }}</td>
+              <td class="px-4 py-3 text-right text-xs text-gray-400 whitespace-nowrap" @click="openProject(p)">{{ fmtDate(p.updatedAt) }}</td>
+              <td class="px-4 py-3 w-44 whitespace-nowrap">
+                <div class="flex gap-2 justify-end">
+                  <button @click.stop="startReimport(p)"
+                    class="text-xs px-2.5 py-1 border border-gray-300 rounded text-gray-600 hover:bg-gray-50 transition">Aktualizuj</button>
+                  <button @click.stop="confirmDelete=p"
+                    class="text-xs px-2.5 py-1 border border-red-200 rounded text-red-500 hover:bg-red-50 transition">Usuń</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-if="totalProjectPages > 1" class="flex items-center justify-between px-4 py-2 border-t border-gray-200">
+          <button @click="projectPage--" :disabled="projectPage<=1"
+            class="text-xs px-3 py-1.5 border border-gray-300 rounded-lg text-gray-500 hover:bg-gray-50 transition disabled:opacity-40 disabled:cursor-not-allowed">
+            ← Poprzednia
+          </button>
+          <span class="text-xs text-gray-400">{{ projectPage }} / {{ totalProjectPages }}</span>
+          <button @click="projectPage++" :disabled="projectPage>=totalProjectPages"
+            class="text-xs px-3 py-1.5 border border-gray-300 rounded-lg text-gray-500 hover:bg-gray-50 transition disabled:opacity-40 disabled:cursor-not-allowed">
+            Następna →
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════════════ -->
+  <!-- Screen: IMPORT                                                          -->
+  <!-- ════════════════════════════════════════════════════════════════════════ -->
+  <div v-if="screen==='import'" class="flex-1 overflow-y-auto flex items-start justify-center p-6">
+    <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-6 w-full max-w-lg mt-6">
+      <h2 class="text-lg font-bold text-gray-800 mb-5">
+        {{ reimportProject ? 'Aktualizuj: ' + reimportProject.name : 'Nowy projekt' }}
+      </h2>
+
+      <!-- Form -->
+      <div v-if="!importing" class="space-y-4">
+        <div v-if="!reimportProject">
+          <label class="block text-xs font-medium text-gray-600 mb-1">Nazwa projektu</label>
+          <input v-model="importName" type="text" placeholder="np. Sinsay PL sierpień 2026"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400">
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Plik XML</label>
+          <!-- File System Access API (Chrome/Edge) — stores handle for re-opening -->
+          <button v-if="supportsFileApi" @click="pickFileWithApi"
+            class="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition w-full">
+            <svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+            {{ importFile ? importFile.name : 'Wybierz plik XML…' }}
+          </button>
+          <!-- Fallback for Firefox / Safari -->
+          <input v-else type="file" accept=".xml" @change="onFileChange"
+            class="block w-full text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border file:border-gray-300 file:text-xs file:text-gray-600 file:bg-white hover:file:bg-gray-50 file:cursor-pointer">
+          <p v-if="importFile" class="text-xs text-gray-400 mt-1">
+            {{ fmtSize(importFile.size) }}
+            <span v-if="!supportsFileApi" class="ml-1 text-amber-500">— plik nie będzie zapamiętany między sesjami</span>
+          </p>
+        </div>
+
+        <div v-if="importFile">
+          <label class="block text-xs font-medium text-gray-600 mb-1">Tag produktu</label>
+          <div v-if="detectingTags" class="flex items-center gap-2 text-xs text-gray-400 py-2">
+            <svg class="w-3 h-3 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+            Wykrywanie struktury XML (pierwsze 10 MB)…
+          </div>
+          <div v-else-if="detectedTags.length">
+            <select v-model="selectedTag"
+              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-blue-400">
+              <option v-for="c in detectedTags" :value="c.tag" :key="c.tag">
+                &lt;{{ c.tag }}&gt;{{ c.isProduct ? ' ★' : '' }} — {{ c.count.toLocaleString('pl-PL') }} wystąpień
+              </option>
+            </select>
+            <p class="text-xs text-gray-400 mt-1">★ = prawdopodobny tag produktu</p>
+          </div>
+          <p v-else class="text-xs text-amber-600 py-1">Nie wykryto powtarzających się tagów w pierwszych 10 MB pliku.</p>
+        </div>
+
+        <div v-if="reimportProject" class="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2">
+          Aktualizacja zastąpi wszystkie dotychczasowe dane projektu. Zapisane filtry zostaną zachowane.
+        </div>
+
+        <div v-if="importError" class="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          {{ importError }}
+        </div>
+
+        <div class="flex gap-2 pt-2">
+          <button @click="goToList"
+            class="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition">
+            Anuluj
+          </button>
+          <button @click="runImport"
+            class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition">
+            {{ reimportProject ? 'Aktualizuj' : 'Importuj' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Progress -->
+      <div v-else class="space-y-3">
+        <p class="text-sm text-gray-600">Przetwarzanie pliku...</p>
+        <div class="flex items-center gap-2">
+          <span class="text-[11px] tabular-nums text-gray-400 w-8 text-right flex-shrink-0">{{ importProgress }}%</span>
+          <div class="flex-1 bg-gray-200 rounded-full h-1">
+            <div class="bg-blue-500 h-1 rounded-full transition-all" :style="{ width: importProgress + '%' }"></div>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 text-center tabular-nums">
+          <div>
+            <div class="text-[10px] text-gray-300 uppercase tracking-wide mb-0.5">skan</div>
+            <div class="text-xs text-gray-500">{{ importItemCount.toLocaleString('pl-PL') }}</div>
+          </div>
+          <div>
+            <div class="text-[10px] text-gray-300 uppercase tracking-wide mb-0.5">czas</div>
+            <div class="text-xs text-gray-500">{{ fmtElapsed(importElapsed) || '—' }}</div>
+          </div>
+        </div>
+        <!-- Warnings during import -->
+        <div v-if="importWarnings.length" class="space-y-1">
+          <div v-for="(w, i) in importWarnings" :key="i"
+            class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-1.5">
+            ⚠ {{ w }}
+          </div>
+        </div>
+        <div v-if="importError" class="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{{ importError }}</div>
+        <button @click="cancelImport" class="text-xs text-gray-400 hover:text-gray-600 transition">Anuluj</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════════════ -->
+  <!-- Screen: PROJECT                                                         -->
+  <!-- ════════════════════════════════════════════════════════════════════════ -->
+  <div v-if="screen==='project'" class="flex-1 overflow-hidden flex flex-col">
+
+    <!-- Project top bar -->
+    <div class="bg-white border-b border-gray-200 px-4 py-2 flex items-center gap-3 flex-shrink-0">
+      <span class="text-xs text-gray-400">
+        {{ (activeProject.itemCount||0).toLocaleString('pl-PL') }} rekordów w feedzie<span v-if="activeProject.processingTime" class="text-gray-300 ml-1">({{ fmtElapsed(activeProject.processingTime) }})</span>
+      </span>
+      <span v-if="activeProject.skipped" class="text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
+        ⚠ {{ activeProject.skipped }} pominiętych (błąd XML)
+      </span>
+      <div class="ml-auto flex items-center gap-2">
+        <button @click="startReimport(activeProject)"
+          class="text-xs px-3 py-1.5 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition">
+          Aktualizuj feed
+        </button>
+        <button @click="confirmDelete=activeProject"
+          class="text-xs px-3 py-1.5 border border-red-200 rounded-lg text-red-500 hover:bg-red-50 transition">
+          Usuń projekt
+        </button>
+      </div>
+    </div>
+
+    <!-- IDB / worker error banner -->
+    <div v-if="projectError" class="bg-red-50 border-b border-red-200 px-4 py-3 flex items-center gap-3 flex-shrink-0">
+      <svg class="w-4 h-4 text-red-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+      <span class="text-xs text-red-700 flex-1">{{ projectError }}</span>
+      <button @click="projectError = null" class="flex-shrink-0 text-xs px-3 py-1.5 border border-red-300 rounded-lg text-red-600 hover:bg-red-100 transition">Zamknij</button>
+    </div>
+
+    <!-- File needed banner -->
+    <div v-if="fileNeeded" class="bg-amber-50 border-b border-amber-200 px-4 py-3 flex items-center gap-3 flex-shrink-0">
+      <svg class="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+      <span class="text-xs text-amber-700 flex-1">Plik nie jest dostępny — wybierz plik XML, aby załadować dane projektu.</span>
+      <input ref="reSelectInput" type="file" accept=".xml" @change="onReSelectFileInput" class="hidden">
+      <button @click="reSelectFile"
+        class="flex-shrink-0 text-xs px-3 py-1.5 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition">
+        Wybierz plik
+      </button>
+    </div>
+
+    <!-- Main layout -->
+    <div class="flex flex-1 overflow-hidden">
+
+      <!-- ── Filter panel (left) ───────────────────────────────────────────── -->
+      <div class="w-80 flex-shrink-0 border-r border-gray-200 bg-white flex flex-col overflow-hidden">
+
+        <!-- Indexing progress (shown during background processing after early open) -->
+        <div v-if="indexing" class="flex-shrink-0 border-b border-blue-100 bg-blue-50 p-3 space-y-2">
+          <div class="flex items-center gap-2">
+            <svg class="w-3.5 h-3.5 text-blue-500 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+            <span class="text-xs font-medium text-blue-700">Indeksowanie rekordów…</span>
+            <span class="text-xs text-blue-400 tabular-nums ml-auto">{{ indexingProgress }}%</span>
+          </div>
+          <div class="bg-blue-200 rounded-full h-1">
+            <div class="bg-blue-500 h-1 rounded-full transition-all" :style="{ width: indexingProgress + '%' }"></div>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] text-blue-400 tabular-nums">
+              {{ indexingScanned.toLocaleString('pl-PL') }} rekordów
+              <span v-if="indexingElapsed" class="ml-0.5">· {{ fmtElapsed(indexingElapsed) }}</span>
+            </span>
+            <button @click="cancelIndexing" class="text-[11px] text-blue-500 hover:text-red-500 transition">Anuluj</button>
+          </div>
+        </div>
+
+        <!-- Scrollable: filter tree + saved filters -->
+        <div class="flex-1 overflow-y-auto p-3 space-y-3">
+          <filter-group :node="filterRoot" :fields="availableFields" :operators="operators" :depth="0" />
+
+          <!-- Save filter -->
+          <div class="border-t border-gray-100 pt-3">
+            <button @click="showSaveFilter=!showSaveFilter"
+              class="text-xs text-blue-600 hover:underline">
+              {{ showSaveFilter ? 'Anuluj' : '+ Zapisz bieżący filtr' }}
+            </button>
+            <div v-if="showSaveFilter" class="mt-2 flex gap-1.5">
+              <input v-model="saveFilterName" placeholder="Nazwa filtru..."
+                class="flex-1 text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:border-blue-400">
+              <button @click="saveCurrentFilter"
+                class="text-xs px-2.5 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 transition">
+                Zapisz
+              </button>
+            </div>
+          </div>
+
+          <!-- Saved filters list -->
+          <div v-if="savedFilters.length" class="space-y-1">
+            <p class="text-xs font-medium text-gray-400 uppercase tracking-wide">Zapisane filtry</p>
+            <div v-for="sf in savedFilters" :key="sf.id"
+              class="flex items-center gap-1 group rounded px-1.5 py-1 hover:bg-gray-50">
+              <button @click="loadSavedFilter(sf)"
+                class="flex-1 text-left text-xs text-blue-700 hover:underline truncate">{{ sf.name }}</button>
+              <button @click="deleteSavedFilter(sf)"
+                class="text-gray-300 hover:text-red-400 opacity-0 group-hover:opacity-100 transition flex-shrink-0">
+                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Fixed bottom: Apply / Clear -->
+        <div class="flex-shrink-0 border-t border-gray-200 p-3 space-y-2 bg-white">
+          <div class="flex gap-2">
+            <button v-if="!filtering" @click="applyFilter" :disabled="indexing"
+              class="flex-1 flex items-center justify-center gap-1.5 py-2 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition disabled:opacity-40">
+              Zastosuj filtr
+            </button>
+            <button v-else @click="cancelFilter"
+              class="flex-1 flex items-center justify-center gap-1.5 py-2 bg-red-500 text-white text-xs font-medium rounded-lg hover:bg-red-600 transition">
+              <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+              Anuluj
+            </button>
+            <button @click="clearFilter" :disabled="filtering || indexing"
+              class="px-3 py-2 border border-gray-300 text-xs rounded-lg text-gray-500 hover:bg-gray-50 transition disabled:opacity-40">
+              Wyczyść
+            </button>
+          </div>
+          <div v-if="filtering && !isIdbMode && filterBytesTotal" class="space-y-2">
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] tabular-nums text-gray-400 w-8 text-right flex-shrink-0">{{ Math.round(filterBytes / filterBytesTotal * 100) }}%</span>
+              <div class="flex-1 bg-gray-200 rounded-full h-1">
+                <div class="bg-blue-500 h-1 rounded-full transition-all" :style="{ width: Math.round(filterBytes / filterBytesTotal * 100) + '%' }"></div>
+              </div>
+            </div>
+            <div class="grid grid-cols-3 text-center tabular-nums">
+              <div>
+                <div class="text-[10px] text-gray-300 uppercase tracking-wide mb-0.5">skan</div>
+                <div class="text-xs text-gray-500">{{ filterScanned.toLocaleString('pl-PL') }}</div>
+              </div>
+              <div>
+                <div class="text-[10px] text-gray-300 uppercase tracking-wide mb-0.5">znaleziono</div>
+                <div class="text-xs text-gray-500">{{ filterResults.length.toLocaleString('pl-PL') }}</div>
+              </div>
+              <div>
+                <div class="text-[10px] text-gray-300 uppercase tracking-wide mb-0.5">czas</div>
+                <div class="text-xs text-gray-500">{{ fmtElapsed(filterElapsed) || '—' }}</div>
+              </div>
+            </div>
+          </div>
+          <div v-if="filtering && isIdbMode" class="grid grid-cols-2 text-center tabular-nums">
+            <div>
+              <div class="text-[10px] text-gray-300 uppercase tracking-wide mb-0.5">skan</div>
+              <div class="text-xs text-gray-500">{{ filterScanned.toLocaleString('pl-PL') }}</div>
+            </div>
+            <div>
+              <div class="text-[10px] text-gray-300 uppercase tracking-wide mb-0.5">czas</div>
+              <div class="text-xs text-gray-500">{{ fmtElapsed(filterElapsed) || '—' }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Results + detail (right) ─────────────────────────────────────── -->
+      <div class="flex-1 overflow-hidden flex flex-col">
+
+        <!-- Results bar -->
+        <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 flex items-center gap-3 flex-shrink-0">
+          <span class="text-xs font-semibold text-gray-700 flex-shrink-0">
+            <span v-if="filtering">{{ hasFilter ? 'Szukam…' : (isIdbMode ? 'Ładowanie…' : 'Ładowanie podglądu…') }}</span>
+            <span v-else>{{ filterResults.length.toLocaleString('pl-PL') }} wyników<span v-if="filterElapsed" class="font-normal text-gray-400 ml-1">({{ fmtElapsed(filterElapsed) }})</span></span>
+          </span>
+          <span v-if="!isIdbMode && !hasFilter && !filtering && filterResults.length" class="text-xs text-gray-400 flex-shrink-0">(podgląd {{ config.previewLimit }})</span>
+          <span v-if="!filtering && filterMatchedTotal > filterResults.length" class="text-xs text-amber-600 flex-shrink-0">ze {{ filterMatchedTotal.toLocaleString('pl-PL') }} {{ hasFilter ? 'pasujących' : 'rekordów' }} (limit {{ config.maxFilterResults.toLocaleString('pl-PL') }})</span>
+          <span v-else-if="hasFilter && !filtering && filterTotal" class="text-xs text-gray-400 flex-shrink-0">z {{ filterTotal.toLocaleString('pl-PL') }} rekordów</span>
+
+          <!-- Quick search -->
+          <div class="relative flex-1 max-w-xs">
+            <svg class="w-3.5 h-3.5 text-gray-400 absolute left-2 top-1/2 -translate-y-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            <input v-model="quickSearch" @input="page=1" placeholder="Szukaj po id, title, url…"
+              :title="isIdbMode ? 'Przeszukuje załadowane rekordy.' : 'Przeszukuje załadowane rekordy (podgląd ' + config.previewLimit + ' lub wyniki filtra). Aby przeszukać wszystkie rekordy użyj filtra.'"
+              class="w-full pl-7 pr-3 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:outline-none focus:border-blue-400">
+          </div>
+
+          <div class="ml-auto flex items-center gap-2">
+            <!-- Column picker -->
+            <div class="relative">
+              <button @click="showColumnPicker=!showColumnPicker"
+                class="text-xs px-3 py-1.5 border border-gray-300 rounded-lg bg-white text-gray-600 hover:bg-gray-50 transition flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h8m-8 6h16"/></svg>
+                Kolumny ({{ visibleFields.length }})
+              </button>
+              <div v-if="showColumnPicker" @click.self="showColumnPicker=false"
+                class="absolute right-0 top-full mt-1 z-20 bg-white border border-gray-200 rounded-xl shadow-xl p-3 w-64 max-h-72 overflow-y-auto">
+                <p class="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Widoczne kolumny</p>
+                <label v-for="f in availableFields" :key="f"
+                  class="flex items-center gap-2 py-1 cursor-pointer hover:bg-gray-50 rounded px-1">
+                  <input type="checkbox" :checked="visibleFields.includes(f)" @change="toggleField(f)"
+                    class="rounded border-gray-300 text-blue-600">
+                  <span class="text-xs text-gray-700 truncate">{{ f }}</span>
+                </label>
+              </div>
+            </div>
+            <!-- Export -->
+            <button @click="doExportXml" :disabled="!filterResults.length || indexing" title="Eksportuj do XML"
+              class="text-xs px-3 py-1.5 border border-gray-300 rounded-lg bg-white text-gray-600 hover:bg-gray-50 transition disabled:opacity-40 flex items-center gap-1">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              XML
+            </button>
+            <button @click="doExportXlsx" :disabled="!filterResults.length || indexing" title="Eksportuj do XLSX"
+              class="text-xs px-3 py-1.5 border border-gray-300 rounded-lg bg-white text-gray-600 hover:bg-gray-50 transition disabled:opacity-40 flex items-center gap-1">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              XLSX
+            </button>
+          </div>
+        </div>
+
+        <!-- Table + detail row -->
+        <div class="flex flex-1 overflow-hidden">
+
+          <!-- Table -->
+          <div class="flex-1 flex flex-col overflow-hidden">
+            <div class="flex-1 overflow-auto tbl-scroll">
+              <table class="border-collapse text-xs w-full min-w-max">
+                <thead>
+                  <tr class="bg-gray-50">
+                    <th v-for="f in visibleFields" :key="f"
+                      @click="toggleSort(f)"
+                      class="px-3 py-2.5 text-left text-gray-500 font-medium border-b border-gray-200 whitespace-nowrap cursor-pointer hover:bg-gray-100 select-none sticky top-0 z-[2] bg-gray-50">
+                      {{ f }}
+                      <span class="ml-1 inline-flex align-middle">
+                        <svg v-if="sortField===f && sortDir==='desc'" class="w-3 h-3 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/></svg>
+                        <svg v-else-if="sortField===f" class="w-3 h-3 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4.5 15.75l7.5-7.5 7.5 7.5"/></svg>
+                        <svg v-else class="w-3 h-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.25 15L12 18.75 15.75 15m-7.5-6L12 5.25 15.75 9"/></svg>
+                      </span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                  <tr v-if="!pagedResults.length">
+                    <td :colspan="visibleFields.length || 1"
+                      class="px-4 py-10 text-center text-gray-400">
+                      {{ hasFilter ? 'Brak wyników dla podanych warunków' : 'Dodaj warunek i kliknij Zastosuj filtr' }}
+                    </td>
+                  </tr>
+                  <tr v-for="(item, idx) in pagedResults" :key="idx"
+                    @click="selectItem(item)"
+                    class="cursor-pointer transition"
+                    :class="selectedItem===item ? 'bg-blue-50' : 'hover:bg-gray-50'">
+                    <td v-for="f in visibleFields" :key="f"
+                      class="px-3 py-2 max-w-[220px] align-middle">
+                      <img v-if="isImageUrl(displayVal(item[f]))"
+                        :src="displayVal(item[f])" loading="lazy"
+                        class="h-9 w-9 object-cover rounded border border-gray-200">
+                      <span v-else class="flex items-center gap-1 min-w-0">
+                        <span class="block truncate text-gray-700" :title="displayVal(item[f])">{{ displayVal(item[f]) }}</span>
+                        <a v-if="isLinkField(f) && isUrl(displayVal(item[f]))"
+                          :href="displayVal(item[f])" target="_blank" rel="noopener"
+                          @click.stop
+                          class="flex-shrink-0 text-gray-400 hover:text-blue-500 transition"
+                          title="Otwórz w nowej karcie">
+                          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                        </a>
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Pagination -->
+            <div class="flex items-center justify-between px-4 py-2 border-t border-gray-200 bg-white flex-shrink-0">
+              <button @click="page--" :disabled="page<=1"
+                class="text-xs px-3 py-1.5 border border-gray-300 rounded-lg text-gray-500 hover:bg-gray-50 transition disabled:opacity-40 disabled:cursor-not-allowed">
+                ← Poprzednia
+              </button>
+              <span class="text-xs text-gray-400">{{ page }} / {{ totalPages }}</span>
+              <button @click="page++" :disabled="page>=totalPages"
+                class="text-xs px-3 py-1.5 border border-gray-300 rounded-lg text-gray-500 hover:bg-gray-50 transition disabled:opacity-40 disabled:cursor-not-allowed">
+                Następna →
+              </button>
+            </div>
+          </div>
+
+          <!-- Detail panel -->
+          <div v-if="selectedItem"
+            class="w-80 flex-shrink-0 border-l border-gray-200 bg-white flex flex-col overflow-hidden detail-scroll">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 flex-shrink-0 bg-gray-50">
+              <span class="text-xs font-semibold text-gray-700">Szczegóły rekordu</span>
+              <div class="flex items-center gap-2">
+                <button @click="doExportItemXml" title="Eksportuj rekord do XML"
+                  class="text-xs px-2 py-1 border border-gray-300 rounded bg-white text-gray-500 hover:bg-gray-50 transition flex items-center gap-1">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                  XML
+                </button>
+                <button @click="selectedItem=null" class="text-gray-400 hover:text-gray-600 transition">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="flex-1 overflow-y-auto p-4 space-y-3">
+              <div v-for="([key, value]) in selectedItemFields" :key="key" class="group">
+                <div class="flex items-center justify-between mb-0.5">
+                  <p class="text-xs font-medium text-gray-400">{{ key }}</p>
+                  <button @click="copyField(key, value)" class="opacity-0 group-hover:opacity-100 transition text-gray-300 hover:text-gray-500 flex-shrink-0 ml-1" title="Kopiuj">
+                    <svg v-if="copiedKey !== key" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                    <svg v-else class="w-3.5 h-3.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                  </button>
+                </div>
+
+                <!-- Array value -->
+                <template v-if="Array.isArray(value)">
+                  <div v-for="(v, i) in value" :key="i" class="mb-1">
+                    <img v-if="isImageUrl(v)" :src="v" loading="lazy"
+                      class="w-full max-h-36 object-contain rounded border border-gray-100 bg-gray-50">
+                    <a v-else-if="isUrl(v)" :href="v" target="_blank" rel="noopener"
+                      class="text-xs text-blue-600 hover:underline block truncate">{{ v }}</a>
+                    <span v-else class="text-xs text-gray-700 bg-gray-50 rounded px-2 py-1 block break-words">{{ v }}</span>
+                  </div>
+                </template>
+
+                <!-- Single value -->
+                <template v-else>
+                  <img v-if="isImageUrl(value)" :src="value" loading="lazy"
+                    class="w-full max-h-36 object-contain rounded border border-gray-100 bg-gray-50">
+                  <a v-else-if="isUrl(value)" :href="value" target="_blank" rel="noopener"
+                    class="text-xs text-blue-600 hover:underline block truncate">{{ value }}</a>
+                  <span v-else class="text-xs text-gray-700 bg-gray-50 rounded px-2 py-1 block break-words">{{ value }}</span>
+                </template>
+              </div><!-- end field row -->
+            </div>
+          </div>
+
+        </div><!-- end table+detail row -->
+      </div><!-- end results area -->
+    </div><!-- end main layout -->
+  </div><!-- end project screen -->
+
+  <!-- Delete confirm modal — global, works from any screen -->
+  <div v-if="confirmDelete" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+    <div class="bg-white rounded-xl shadow-xl p-6 w-80">
+      <h3 class="font-bold text-gray-800 mb-2">Usuń projekt</h3>
+      <p class="text-sm text-gray-600 mb-5">Czy na pewno chcesz usunąć <strong>{{ confirmDelete.name }}</strong>? Metadane i zapisane filtry zostaną trwale usunięte.</p>
+      <div class="flex gap-2 justify-end">
+        <button @click="confirmDelete=null"
+          class="px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition">Anuluj</button>
+        <button @click="doDeleteProject"
+          class="px-4 py-2 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 transition">Usuń</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete all confirm modal -->
+  <div v-if="confirmDeleteAll" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+    <div class="bg-white rounded-xl shadow-xl p-6 w-80">
+      <h3 class="font-bold text-gray-800 mb-2">Usuń wszystkie dane</h3>
+      <p class="text-sm text-gray-600 mb-5">Czy na pewno chcesz usunąć <strong>wszystkie projekty</strong>, zapisane filtry i dane? Tej operacji nie można cofnąć.</p>
+      <div class="flex gap-2 justify-end">
+        <button @click="confirmDeleteAll=false"
+          class="px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition">Anuluj</button>
+        <button @click="doDeleteAll"
+          class="px-4 py-2 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 transition">Usuń wszystko</button>
+      </div>
+    </div>
+  </div>
+</div><!-- end #app -->
+
+<!-- Worker source — type="text/plain" prevents execution; loaded as Blob URL at runtime
+     to work around Chrome's file:// null-origin restriction on Worker paths.
+     Keep in sync with js/worker.js (the .js file is the canonical source). -->
+<script type="text/plain" id="feed-worker-src">
+/* Keep in sync with js/worker.js (canonical source) */
+const MAX_ITEM_BYTES=50*1024*1024,NO_TAG_WARN_AT=20*1024*1024;
+let cfg=null,schema=null,filterTree=null,itemLimit=null,resultLimit=null,discoverOnly=false,stopped=false;
+self.onmessage=async({data})=>{
+  try{
+    if(data.detectTags){await _detectTags(data.file);return;}
+    cfg=data.config;schema=data.schema;filterTree=data.filter||null;itemLimit=data.limit||null;resultLimit=data.resultLimit||null;discoverOnly=!!data.discoverOnly;await _streamFile(data.file);
+  }catch(err){self.postMessage({type:'error',message:err.message});}
+};
+const PRODUCT_KW=['product','item','entry','offer','sku','article','record','row','variant','prod'];
+const IGNORE_TAGS=new Set(['?xml','xml','!--']);
+async function _detectTags(file){
+  const SCAN=Math.min(file.size,10*1024*1024);
+  const text=new TextDecoder('utf-8',{fatal:false}).decode(await file.slice(0,SCAN).arrayBuffer());
+  const counts={},first={};const re=/<([a-zA-Z][a-zA-Z0-9_:-]*)/g;let m;
+  while((m=re.exec(text))!==null){const t=m[1];if(IGNORE_TAGS.has(t))continue;counts[t]=(counts[t]||0)+1;if(first[t]===undefined)first[t]=m.index;}
+  const candidates=Object.entries(counts).filter(([,c])=>c>=2)
+    .map(([tag,count])=>({tag,count,isProduct:PRODUCT_KW.some(kw=>tag.toLowerCase().includes(kw))}))
+    .sort((a,b)=>{if(a.isProduct!==b.isProduct)return a.isProduct?-1:1;if(a.count!==b.count)return a.count-b.count;return(first[a.tag]||0)-(first[b.tag]||0);});
+  self.postMessage({type:'done',candidates});
+}
+function _extractNumber(s){const m=String(s).replace(/\s/g,'').match(/-?\d[\d.,]*/);if(!m)return null;let raw=m[0];const ld=raw.lastIndexOf('.');const lc=raw.lastIndexOf(',');if(ld>-1&&lc>-1){if(lc>ld){raw=raw.replace(/\./g,'').replace(',','.');}else{raw=raw.replace(/,/g,'');}}else if(lc>-1){if((raw.match(/,/g)||[]).length===1){raw=raw.replace(',','.');}else{raw=raw.replace(/,/g,'');}}else if((raw.match(/\./g)||[]).length>1){raw=raw.replace(/\./g,'');}const n=parseFloat(raw);return isNaN(n)?null:n;}
+function _testCondition(item,{field,operator,value}){let raw=item[field];if(raw===undefined||raw===null)raw='';const values=Array.isArray(raw)?raw.map(String):[String(raw)];
+  if(operator==='is_empty')return values.every(v=>v.trim()==='');
+  if(operator==='is_not_empty')return values.some(v=>v.trim()!=='');
+  if(operator==='regex'){try{const re=new RegExp(value,'i');return values.some(v=>re.test(v));}catch{return false;}}
+  const numOps=['gt','gte','lt','lte','eq_num','neq_num'];
+  if(numOps.includes(operator)){const thr=_extractNumber(value);if(thr===null)return false;return values.some(v=>{const n=_extractNumber(v);if(n===null)return false;switch(operator){case'gt':return n>thr;case'gte':return n>=thr;case'lt':return n<thr;case'lte':return n<=thr;case'eq_num':return n===thr;case'neq_num':return n!==thr;}});}
+  const lv=value.toLowerCase();
+  if(operator==='not_contains')return values.every(v=>!v.toLowerCase().includes(lv));
+  if(operator==='not_equals')return values.every(v=>v.toLowerCase()!==lv);
+  return values.some(v=>{const s=v.toLowerCase();switch(operator){case'contains':return s.includes(lv);case'equals':return s===lv;case'starts_with':return s.startsWith(lv);case'ends_with':return s.endsWith(lv);}return false;});
+}
+function evaluateFilter(item,node){if(!node||!node.type)return true;if(node.type==='condition')return _testCondition(item,node);const kids=node.children||[];if(!kids.length)return true;const r=kids.map(c=>evaluateFilter(item,c));return node.type==='AND'?r.every(Boolean):r.some(Boolean);}
+async function _streamFile(file){
+  const decoder=new TextDecoder('utf-8',{fatal:false});
+  let buffer='',itemTag=null,scannedCount=0,matchedCount=0,skipCount=0,batch=[],noTagWarned=false;
+  const allFields=new Set();let offset=0;stopped=false;
+  const flush=(final)=>{
+    if(!itemTag)return;
+    const open='<'+itemTag,close='</'+itemTag+'>';
+    while(true){
+      if(buffer.length>MAX_ITEM_BYTES){const nx=buffer.indexOf(open,open.length);if(nx!==-1){skipCount++;self.postMessage({type:'warn',message:'Pominięto rekord — rozmiar bufora przekroczył '+(MAX_ITEM_BYTES/1048576)+' MB (niezamknięty tag lub uszkodzony XML)'});buffer=buffer.slice(nx);}else{buffer='';break;}}
+      const start=buffer.indexOf(open);if(start===-1){if(!final)buffer=buffer.slice(-close.length);break;}
+      const openEnd=buffer.indexOf('>',start);if(openEnd===-1){buffer=buffer.slice(start);break;}
+      const end=buffer.indexOf(close,openEnd);if(end===-1){if(!final){buffer=buffer.slice(start);break;}skipCount++;break;}
+      const xml=buffer.slice(start,end+close.length);buffer=buffer.slice(end+close.length);
+      try{
+        const item=_parseItem(xml,itemTag);Object.keys(item).forEach(k=>allFields.add(k));scannedCount++;
+        if(!discoverOnly){if(!filterTree||evaluateFilter(item,filterTree)){matchedCount++;if(!resultLimit||matchedCount<=resultLimit){batch.push(item);if(batch.length>=cfg.batchSize){self.postMessage({type:'batch',items:batch});batch=[];}}if(itemLimit&&matchedCount>=itemLimit){stopped=true;return;}}}else if(itemLimit&&scannedCount<=itemLimit){batch.push(item);if(batch.length>=itemLimit){self.postMessage({type:'batch',items:batch});batch=[];}}
+      }catch(_){skipCount++;}
+    }
+  };
+  while(offset<file.size){
+    const slice=file.slice(offset,offset+cfg.chunkSize);const ab=await slice.arrayBuffer();const isLast=offset+ab.byteLength>=file.size;
+    buffer+=decoder.decode(ab,{stream:!isLast});offset+=ab.byteLength;
+    if(!itemTag){for(const tag of schema.itemTags){if(buffer.includes('<'+tag+'>')||buffer.includes('<'+tag+' ')){itemTag=tag;break;}}
+      if(!itemTag&&!noTagWarned&&offset>=NO_TAG_WARN_AT){noTagWarned=true;self.postMessage({type:'warn',message:'Przetworzono '+(NO_TAG_WARN_AT/1048576)+' MB bez znalezienia tagów: '+schema.itemTags.join(', ')+'. Sprawdź schemat parsowania.'});}}
+    flush(false);if(filterTree&&batch.length){self.postMessage({type:'batch',items:batch});batch=[];}self.postMessage({type:'progress',bytes:offset,total:file.size,count:scannedCount});if(stopped)break;
+  }
+  if(!stopped)flush(true);
+  if(batch.length)self.postMessage({type:'batch',items:batch});
+  self.postMessage({type:'done',count:discoverOnly?scannedCount:matchedCount,scanned:scannedCount,skipped:skipCount,fields:[...allFields].sort()});
+}
+function _parseItem(xml,outerTag){const cdata=[];const safe=xml.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,(_,c)=>{cdata.push(c);return'\x00C'+(cdata.length-1)+'\x00';});const innerStart=safe.indexOf('>')+1;const innerEnd=safe.lastIndexOf('</'+outerTag+'>');return _parseChildren(safe.slice(innerStart,innerEnd),'',cdata,schema.maxDepth);}
+function _findClose(xml,afterOpen,tagName){const open='<'+tagName,close='</'+tagName+'>';let depth=1,i=afterOpen;while(i<xml.length&&depth>0){const nc=xml.indexOf(close,i),no=xml.indexOf(open,i);if(nc===-1)return xml.length;if(no!==-1&&no<nc){const ch=xml[no+open.length];if(ch==='>'||ch===' '||ch==='\t'||ch==='\n'||ch==='\r'||ch==='/'){depth++;i=no+open.length;}else i=no+1;}else{depth--;if(depth===0)return nc;i=nc+close.length;}}return xml.length;}
+function _parseChildren(xml,prefix,cdata,depthLeft){const result={};let i=0;while(i<xml.length){const lt=xml.indexOf('<',i);if(lt===-1)break;if(xml[lt+1]==='/')break;if(xml.slice(lt,lt+4)==='<!--'){const end=xml.indexOf('-->',lt);i=end===-1?xml.length:end+3;continue;}let j=lt+1;while(j<xml.length&&xml[j]!=='>'&&xml[j]!==' '&&xml[j]!=='\t'&&xml[j]!=='\n'&&xml[j]!=='\r'&&xml[j]!=='/')j++;const tagName=xml.slice(lt+1,j);if(!tagName){i=lt+1;continue;}let selfClose=false;while(j<xml.length&&xml[j]!=='>'){if(xml[j]==='/')selfClose=true;j++;}j++;const fieldKey=prefix?prefix+schema.nestedSeparator+tagName:tagName;if(selfClose){_setField(result,fieldKey,'');i=j;continue;}const closeIdx=_findClose(xml,j,tagName);const content=xml.slice(j,closeIdx);i=closeIdx+('</'+tagName+'>').length;const hasChildren=depthLeft>0&&/<[a-zA-Z]/.test(content.replace(/\x00C\d+\x00/g,''));if(hasChildren){const nested=_parseChildren(content,fieldKey,cdata,depthLeft-1);for(const[k,v]of Object.entries(nested))_setField(result,k,v);}else _setField(result,fieldKey,_text(content,cdata));}return result;}
+function _text(s,cdata){return s.replace(/\x00C(\d+)\x00/g,(_,i)=>cdata[+i]).replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&#(\d+);/g,(_,n)=>String.fromCharCode(+n)).trim();}
+function _setField(obj,key,value){if(obj[key]===undefined)obj[key]=value;else if(Array.isArray(obj[key]))obj[key].push(value);else obj[key]=[obj[key],value];}
+</script>
+
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="config.js"></script>
+<script src="js/schemas.js"></script>
+<script src="js/db.js"></script>
+<script src="js/filter.js"></script>
+<script src="js/export.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
