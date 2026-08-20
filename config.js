@@ -1,6 +1,6 @@
 const CONFIG = {
-  version: '1.7',
-  date: '19.08.2026',
+  version: '1.8',
+  date: '20.08.2026',
 
   pageSize: 50,
   previewLimit: 200,

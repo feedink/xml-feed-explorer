@@ -1,4 +1,11 @@
 const CHANGELOG = [
+  { version: '1.8', date: '20.08.2026', changes: [
+    'Import reguł wykluczających z innego systemu (przycisk „Importuj reguły" + modal)',
+    'Automatyczne mapowanie operatorów i dopasowanie pól z podpowiedzią przy niezgodnych nazwach',
+    'Dołączanie kolejnych importów do bieżącego filtra przez OR',
+    'Rozkład wyników per filtr (gałęzie OR) — liczniki i podgląd rekordów pojedynczej gałęzi',
+    'Przełącznik wartość/lista w warunkach zmieniony na ikonki z tooltipem',
+  ]},
   { version: '1.7', date: '19.08.2026', changes: [
     'Pełny eksport XML/XLSX powyżej limitu 250k rekordów',
     'Duplikowanie bloków filtra (przycisk obok usuwania)',

@@ -159,6 +159,28 @@ async function filterItems(projectId, filterFn, onProgress, signal) {
   });
 }
 
+// Single cursor pass counting matches for several filters at once (per-branch counts).
+async function countByFilters(projectId, filterFns, onProgress, signal) {
+  const db = await _getProjectDB(projectId);
+  return new Promise((resolve, reject) => {
+    const counts = new Array(filterFns.length).fill(0);
+    let scanned = 0;
+    const tx  = db.transaction('items');
+    const req = tx.objectStore('items').openCursor();
+    req.onsuccess = e => {
+      if (signal?.cancelled) { resolve(counts); return; }
+      const cursor = e.target.result;
+      if (!cursor) { resolve(counts); return; }
+      scanned++;
+      const item = cursor.value;
+      for (let i = 0; i < filterFns.length; i++) if (filterFns[i](item)) counts[i]++;
+      if (onProgress && scanned % 5000 === 0) onProgress(scanned);
+      cursor.continue();
+    };
+    req.onerror = e => reject(e.target.error);
+  });
+}
+
 async function getFirstItems(projectId, limit) {
   const db = await _getProjectDB(projectId);
   return new Promise((resolve, reject) => {

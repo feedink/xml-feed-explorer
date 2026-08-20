@@ -110,8 +110,8 @@ const FilterGroup = {
                 <div v-if="fieldDropOpen[idx]" class="fixed inset-0 z-20" @click="closeDrop(idx)"></div>
                 <!-- Trigger button -->
                 <button type="button" @click="fieldDropOpen[idx] ? closeDrop(idx) : openDrop(idx)"
-                  class="w-full text-left text-xs border border-gray-300 rounded px-2 py-1.5 bg-white flex items-center gap-1 min-w-0"
-                  :class="child.field ? 'text-gray-800' : 'text-gray-400'">
+                  class="w-full text-left text-xs border rounded px-2 py-1.5 bg-white flex items-center gap-1 min-w-0"
+                  :class="[child.field ? 'text-gray-800' : 'text-gray-400', (child._sourceHint && !child.field) ? 'border-amber-400' : 'border-gray-300']">
                   <span class="flex-1 truncate">{{ child.field || '-- wybierz pole --' }}</span>
                   <svg class="w-3 h-3 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/></svg>
                 </button>
@@ -144,18 +144,28 @@ const FilterGroup = {
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
               </button>
             </div>
+            <div v-if="child._sourceHint" class="flex items-start gap-1 text-[10px] leading-tight"
+              :class="child.field ? 'text-gray-400' : 'text-amber-600'">
+              <svg class="w-3 h-3 flex-shrink-0 mt-px" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+              <span v-if="!child.field">w systemie: <strong>{{ child._sourceHint }}</strong> — wybierz pole ręcznie</span>
+              <span v-else>z: <strong>{{ child._sourceHint }}</strong> → {{ child.field }} (auto — sprawdź)</span>
+            </div>
             <div class="flex items-center gap-1.5">
               <select v-model="child.operator"
                 class="flex-shrink-0 text-xs border border-gray-300 rounded px-2 py-1.5 bg-white">
                 <option v-for="op in operators" :value="op.value" :key="op.value">{{ op.label }}</option>
               </select>
               <template v-if="!opMeta(child.operator).noValue">
-                <button v-for="t in ['wartość','lista']" :key="t" type="button"
-                  @click="child.multiline = t==='lista'"
-                  class="px-2 py-0.5 text-[11px] font-medium rounded transition"
-                  :class="(t==='lista') === !!child.multiline
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-white border border-gray-300 text-gray-500 hover:bg-gray-50'">{{ t }}</button>
+                <button type="button" @click="child.multiline = false" title="Pojedyncza wartość"
+                  class="flex items-center justify-center w-6 h-6 rounded transition"
+                  :class="!child.multiline ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-500 hover:bg-gray-50'">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 6h12M12 6v12"/></svg>
+                </button>
+                <button type="button" @click="child.multiline = true" title="Lista wartości (jedna na linię)"
+                  class="flex items-center justify-center w-6 h-6 rounded transition"
+                  :class="child.multiline ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-500 hover:bg-gray-50'">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+                </button>
               </template>
             </div>
             <div v-if="!opMeta(child.operator).noValue">
@@ -245,6 +255,8 @@ const app = createApp({
       savedFilters:   [],
       showSaveFilter: false,
       saveFilterName: '',
+      showRuleImport: false,
+      ruleImportText: '',
 
       // Indexing (background processing after early project open)
       indexing:           false,
@@ -258,6 +270,16 @@ const app = createApp({
       filterResults:   [],
       filterTruncated: false,
       filtering:       false,
+
+      // Per-branch breakdown (top-level OR branches of the applied filter)
+      appliedBranches:        [],   // deep-cloned OR branches captured at apply time
+      showBreakdown:          false, // gray breakdown row toggled from the results bar
+      activeBranchIndex:      null, // drill-down: null = combined, else branch index
+      branchCounts:           [],
+      branchCountsComputed:   false,
+      branchCounting:         false,
+      branchCountUnavailable: false, // case B in stream mode (>250k) — counts not available
+
       filterScanned:   0,
       filterTotal:        0,    // total scanned (from done.scanned) after filter run
       filterMatchedTotal: 0,    // total matched (may exceed filterResults if capped)
@@ -289,6 +311,8 @@ const app = createApp({
     filterRoot: {
       deep: true,
       handler() {
+        // Editing the filter invalidates any computed breakdown / drill-down
+        if (this.branchCountsComputed || this.activeBranchIndex !== null) this._resetBranchState();
         if (!this.filterValidationActive) return;
         const ids = [];
         _collectInvalidIds(this.filterRoot, CONFIG.operators, ids);
@@ -303,6 +327,16 @@ const app = createApp({
     availableFields(){ return this.activeProject?.fields || []; },
     hasFilter()      { return this.filterRoot.children.length > 0; },
     isIdbMode()      { return this.activeProject && this.activeProject.fileSize < CONFIG.idbSizeLimit; },
+
+    ruleImportResult() {
+      if (!this.ruleImportText.trim()) return null;
+      try { return convertExcludeRules(this.ruleImportText, this.availableFields); }
+      catch (e) {
+        return { tree: null, ruleTrees: [], ok: false, ruleCount: 0, imported: 0, skipped: 0,
+                 skippedReasons: [], warnings: [], errors: ['Błąd konwersji: ' + e.message],
+                 unmapped: [], softMapped: [] };
+      }
+    },
 
     filteredProjects() {
       const q = this.projectSearch.trim().toLowerCase();
@@ -332,9 +366,26 @@ const app = createApp({
       });
     },
 
+    // Top-level OR branches of the applied filter (empty unless root is OR with >1 child)
+    filterBranches() { return this.appliedBranches; },
+    resultsTruncated() { return this.filterMatchedTotal > this.filterResults.length; },
+    displayedCount() {
+      return this.activeBranchIndex === null ? this.filterResults.length : this.branchResults.length;
+    },
+
+    // Results narrowed to the active branch (drill-down). Case A only: filterResults holds
+    // the complete matched set, and each OR branch ⊆ that set, so client-side filtering is exact.
+    branchResults() {
+      if (this.activeBranchIndex === null) return this.filterResults;
+      const b = this.appliedBranches[this.activeBranchIndex];
+      if (!b) return this.filterResults;
+      return this.filterResults.filter(item => evaluateFilter(item, b));
+    },
+
     sortedResults() {
-      if (!this.sortField || this.filterResults.length > 5000) return this.filterResults;
-      return [...this.filterResults].sort((a, b) => {
+      const base = this.branchResults;
+      if (!this.sortField || base.length > 5000) return base;
+      return [...base].sort((a, b) => {
         const va = String(a[this.sortField] ?? '');
         const vb = String(b[this.sortField] ?? '');
         return this.sortDir === 'asc' ? va.localeCompare(vb, 'pl') : vb.localeCompare(va, 'pl');
@@ -386,6 +437,8 @@ const app = createApp({
       this.activeProject = null;
       this.selectedItem  = null;
       this.filterResults = [];
+      this.appliedBranches = [];
+      this._resetBranchState();
       this._stopIndexingTimer();
       this.indexing       = false;
       this.projects      = await getProjects();
@@ -939,6 +992,10 @@ const app = createApp({
       }
       this.filterInvalidIds = new Set();
       this.filterValidationActive = false;
+      // Capture the applied filter's top-level OR branches for the per-branch breakdown
+      this.appliedBranches = (this.filterRoot.type === 'OR' && this.filterRoot.children.length > 1)
+        ? JSON.parse(JSON.stringify(this.filterRoot.children)) : [];
+      this._resetBranchState();
       // Persist filter immediately
       const update = toRaw(this.activeProject);
       update.lastFilter = this.hasFilter ? JSON.parse(JSON.stringify(this.filterRoot)) : null;
@@ -989,6 +1046,8 @@ const app = createApp({
       this.quickSearch = '';
       this.filterInvalidIds = new Set();
       this.filterValidationActive = false;
+      this.appliedBranches = [];
+      this._resetBranchState();
       if (this.fullExporting) this.cancelFullExport();
       if (!this.activeProject) return;
       if (this._isIdbMode(this.activeProject)) {
@@ -1013,6 +1072,91 @@ const app = createApp({
       }
     },
 
+    // ── per-branch breakdown ──────────────────────────────────────────────────
+    _resetBranchState() {
+      this.showBreakdown          = false;
+      this.activeBranchIndex      = null;
+      this.branchCounts           = [];
+      this.branchCountsComputed   = false;
+      this.branchCounting         = false;
+      this.branchCountUnavailable = false;
+      if (this._branchSignal) { this._branchSignal.cancelled = true; this._branchSignal = null; }
+    },
+
+    // Toggle the breakdown row. Case A (in-memory) auto-computes counts on open;
+    // case B waits for an explicit "Policz" click inside the row (full re-scan).
+    toggleBreakdown() {
+      this.showBreakdown = !this.showBreakdown;
+      if (this.showBreakdown && !this.resultsTruncated && !this.branchCountsComputed) {
+        this.computeBranchCounts();
+      }
+    },
+
+    _firstCondition(node) {
+      if (!node) return null;
+      if (node.type === 'condition') return node;
+      for (const c of (node.children || [])) { const f = this._firstCondition(c); if (f) return f; }
+      return null;
+    },
+
+    branchLabel(node) {
+      const first = this._firstCondition(node);
+      if (!first) return 'grupa';
+      const op  = (CONFIG.operators.find(o => o.value === first.operator) || {}).label || first.operator;
+      const val = first.multiline ? '(lista)' : (first.value || '');
+      const extra = this._countConditions(node) > 1 ? ' …' : '';
+      return `${first.field || '?'} ${op} ${val}`.trim() + extra;
+    },
+
+    _countConditions(node) {
+      if (!node) return 0;
+      if (node.type === 'condition') return 1;
+      return (node.children || []).reduce((n, c) => n + this._countConditions(c), 0);
+    },
+
+    computeBranchCounts() {
+      if (!this.appliedBranches.length) return;
+      this.branchCountUnavailable = false;
+      const branches = this.appliedBranches.map(b => JSON.parse(JSON.stringify(b)));
+      if (!this.resultsTruncated) {
+        // Case A — client-side over the fully-loaded result set
+        this.branchCounts = branches.map(b => {
+          let n = 0;
+          for (const it of this.filterResults) if (evaluateFilter(it, b)) n++;
+          return n;
+        });
+        this.branchCountsComputed = true;
+        return;
+      }
+      // Case B — full set exceeds the in-memory cap; counts only, no drill-down
+      if (this._isIdbMode(this.activeProject)) {
+        this.branchCounting = true;
+        this._branchSignal = { cancelled: false };
+        const fns = branches.map(b => (item) => evaluateFilter(item, b));
+        countByFilters(this.activeProject.id, fns, null, this._branchSignal)
+          .then(counts => { this.branchCounts = counts; this.branchCountsComputed = true; })
+          .catch(e => { this.projectError = e.message || 'Błąd liczenia per filtr.'; })
+          .finally(() => { this.branchCounting = false; });
+      } else {
+        // Stream mode >250k — would require re-streaming a >1 GB file per branch
+        this.branchCountUnavailable = true;
+        this.branchCountsComputed   = true;
+      }
+    },
+
+    selectBranch(idx) {
+      if (this.resultsTruncated) return;          // drill-down only in case A
+      this.activeBranchIndex = this.activeBranchIndex === idx ? null : idx;
+      this.page         = 1;
+      this.selectedItem = null;
+    },
+
+    clearBranch() {
+      this.activeBranchIndex = null;
+      this.page         = 1;
+      this.selectedItem = null;
+    },
+
     // ── saved filters ─────────────────────────────────────────────────────────
     async saveCurrentFilter() {
       if (!this.saveFilterName.trim()) return;
@@ -1035,6 +1179,38 @@ const app = createApp({
     async deleteSavedFilter(sf) {
       await deleteSavedFilter(sf.id);
       this.savedFilters = await getSavedFilters(this.activeProject.id);
+    },
+
+    // ── rule import (from the other system) ───────────────────────────────────
+    openRuleImport() {
+      this.ruleImportText = '';
+      this.showRuleImport = true;
+    },
+
+    // Appends converted exclude rules onto the current filter (OR). Does NOT run
+    // the filter — that stays on the user's "Zastosuj filtr" click, as before.
+    applyRuleImport() {
+      const res = this.ruleImportResult;
+      if (!res || !res.ok || !res.ruleTrees.length) return;
+      const newTrees = JSON.parse(JSON.stringify(res.ruleTrees));  // one tree per imported rule
+      // Build the OR-branch list: existing filter (if any) + each imported rule.
+      // An existing OR root is unwrapped so we append to its list rather than nest OR-in-OR.
+      const units = [];
+      if (this.hasFilter) {
+        if (this.filterRoot.type === 'OR') units.push(...this.filterRoot.children);
+        else units.push(this.filterRoot);
+      }
+      units.push(...newTrees);
+      // Root must be a group: a lone group is used as-is, a lone condition is wrapped,
+      // multiple units are OR-ed together.
+      let root;
+      if (units.length === 1) root = units[0].type === 'condition' ? { type: 'AND', children: [units[0]] } : units[0];
+      else root = { type: 'OR', children: units };
+      this.filterRoot = root;
+      _ensureNodeIds(this.filterRoot);
+      this.filterInvalidIds = new Set();
+      this.filterValidationActive = false;
+      this.showRuleImport = false;
     },
 
     // ── table ─────────────────────────────────────────────────────────────────
@@ -1121,14 +1297,14 @@ const app = createApp({
         await this._fullExport('xml');
       } else {
         const schema = this._getSchema(this.activeProject);
-        exportXml(this.filterResults, schema?.itemTags?.[0] || 'item', schema?.nestedSeparator || '.');
+        exportXml(this.branchResults, schema?.itemTags?.[0] || 'item', schema?.nestedSeparator || '.');
       }
     },
     async doExportXlsx() {
       if (this.filterMatchedTotal > this.filterResults.length) {
         await this._fullExport('xlsx');
       } else {
-        exportXlsx(this.filterResults, this.visibleFields);
+        exportXlsx(this.branchResults, this.visibleFields);
       }
     },
     doExportItemXml() {

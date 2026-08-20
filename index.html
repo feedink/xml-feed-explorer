@@ -315,6 +315,11 @@
 
         <!-- Scrollable: filter tree + saved filters -->
         <div class="flex-1 overflow-y-auto p-3 space-y-3">
+          <button @click="openRuleImport"
+            class="w-full flex items-center justify-center gap-1.5 text-xs px-2 py-2 rounded-lg border border-dashed border-blue-300 text-blue-600 hover:bg-blue-50 transition">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            Importuj reguły z systemu
+          </button>
           <filter-group :node="filterRoot" :fields="availableFields" :operators="operators" :depth="0" :invalid-ids="filterInvalidIds" />
 
           <!-- Save filter -->
@@ -411,11 +416,11 @@
         <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 flex items-center gap-3 flex-shrink-0">
           <span class="text-xs font-semibold text-gray-700 flex-shrink-0">
             <span v-if="filtering">{{ hasFilter ? 'Szukam…' : (isIdbMode ? 'Ładowanie…' : 'Ładowanie podglądu…') }}</span>
-            <span v-else>{{ filterResults.length.toLocaleString('pl-PL') }} wyników<span v-if="filterElapsed" class="font-normal text-gray-400 ml-1">({{ fmtElapsed(filterElapsed) }})</span></span>
+            <span v-else>{{ displayedCount.toLocaleString('pl-PL') }} wyników<span v-if="activeBranchIndex!==null" class="font-normal text-blue-500 ml-1">· Filtr {{ activeBranchIndex+1 }}</span><span v-else-if="filterElapsed" class="font-normal text-gray-400 ml-1">({{ fmtElapsed(filterElapsed) }})</span></span>
           </span>
-          <span v-if="!isIdbMode && !hasFilter && !filtering && filterResults.length" class="text-xs text-gray-400 flex-shrink-0">(podgląd {{ config.previewLimit }})</span>
-          <span v-if="!filtering && filterMatchedTotal > filterResults.length" class="text-xs text-amber-600 flex-shrink-0">ze {{ filterMatchedTotal.toLocaleString('pl-PL') }} {{ hasFilter ? 'pasujących' : 'rekordów' }} (limit {{ config.maxFilterResults.toLocaleString('pl-PL') }})</span>
-          <span v-else-if="hasFilter && !filtering && filterTotal" class="text-xs text-gray-400 flex-shrink-0">z {{ filterTotal.toLocaleString('pl-PL') }} rekordów</span>
+          <span v-if="activeBranchIndex===null && !isIdbMode && !hasFilter && !filtering && filterResults.length" class="text-xs text-gray-400 flex-shrink-0">(podgląd {{ config.previewLimit }})</span>
+          <span v-if="activeBranchIndex===null && !filtering && filterMatchedTotal > filterResults.length" class="text-xs text-amber-600 flex-shrink-0">ze {{ filterMatchedTotal.toLocaleString('pl-PL') }} {{ hasFilter ? 'pasujących' : 'rekordów' }} (limit {{ config.maxFilterResults.toLocaleString('pl-PL') }})</span>
+          <span v-else-if="activeBranchIndex===null && hasFilter && !filtering && filterTotal" class="text-xs text-gray-400 flex-shrink-0">z {{ filterTotal.toLocaleString('pl-PL') }} rekordów</span>
 
           <!-- Quick search -->
           <div class="relative flex-1 max-w-xs">
@@ -424,6 +429,14 @@
               :title="isIdbMode ? 'Przeszukuje załadowane rekordy.' : 'Przeszukuje załadowane rekordy (podgląd ' + config.previewLimit + ' lub wyniki filtra). Aby przeszukać wszystkie rekordy użyj filtra.'"
               class="w-full pl-7 pr-3 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:outline-none focus:border-blue-400">
           </div>
+
+          <!-- Per-branch breakdown toggle (only for OR filter with >1 branch) -->
+          <button v-if="filterBranches.length && !filtering && filterResults.length" @click="toggleBreakdown"
+            title="Wyniki per filtr" class="text-xs px-3 py-1.5 border rounded-lg transition flex items-center gap-1.5 flex-shrink-0"
+            :class="showBreakdown ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+            Per filtr ({{ filterBranches.length }})
+          </button>
 
           <div class="ml-auto flex items-center gap-2">
             <!-- Column picker -->
@@ -464,6 +477,41 @@
                 XLSX<span v-if="filterMatchedTotal > filterResults.length" class="text-[10px] text-blue-600 ml-0.5">pełny</span>
               </button>
             </template>
+          </div>
+        </div>
+
+        <!-- Per-branch breakdown row (toggled from the results bar) -->
+        <div v-if="showBreakdown && filterBranches.length && !filtering && filterResults.length"
+          class="flex-shrink-0 border-b border-gray-200 bg-gray-50 px-4 py-2">
+          <div class="flex items-center gap-2 flex-wrap">
+            <button v-if="!branchCountsComputed && !branchCounting" @click="computeBranchCounts"
+              class="text-xs px-2.5 py-1 rounded border border-blue-300 text-blue-600 hover:bg-blue-50 transition flex items-center gap-1.5">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+              Policz wyniki per filtr ({{ filterBranches.length }})
+            </button>
+            <span v-if="branchCounting" class="text-xs text-gray-500 flex items-center gap-1.5">
+              <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+              Liczę per filtr…
+            </span>
+
+            <template v-if="branchCountsComputed && !branchCountUnavailable">
+              <span class="text-xs text-gray-400 flex-shrink-0">Rozkład:</span>
+              <button v-for="(b, i) in filterBranches" :key="i" @click="selectBranch(i)"
+                :title="resultsTruncated ? branchLabel(b) + ' — podgląd rekordów niedostępny powyżej limitu' : branchLabel(b)"
+                class="text-xs px-2 py-1 rounded border transition max-w-[240px] flex items-center gap-1.5"
+                :class="[activeBranchIndex===i ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50', resultsTruncated ? 'cursor-default' : '']">
+                <span class="truncate">{{ i+1 }}. {{ branchLabel(b) }}</span>
+                <span class="font-semibold tabular-nums flex-shrink-0" :class="activeBranchIndex===i ? '' : 'text-blue-600'">{{ (branchCounts[i]||0).toLocaleString('pl-PL') }}</span>
+              </button>
+              <button v-if="activeBranchIndex!==null" @click="clearBranch"
+                class="text-xs px-2 py-1 rounded text-gray-500 hover:text-blue-600 transition flex-shrink-0">Pokaż wszystkie</button>
+              <span v-if="resultsTruncated" class="text-[11px] text-amber-600 flex-shrink-0">tylko liczniki (powyżej limitu {{ config.maxFilterResults.toLocaleString('pl-PL') }})</span>
+              <span v-else class="text-[11px] text-gray-400 flex-shrink-0">rekord może pasować do kilku filtrów</span>
+            </template>
+
+            <span v-if="branchCountUnavailable" class="text-xs text-amber-600">
+              Liczenie per filtr niedostępne dla plików strumieniowych powyżej limitu {{ config.maxFilterResults.toLocaleString('pl-PL') }}.
+            </span>
           </div>
         </div>
 
@@ -638,6 +686,63 @@
       </div>
     </div>
   </div>
+
+  <!-- Rule import modal -->
+  <div v-if="showRuleImport" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-xl shadow-xl p-6 w-[560px] max-w-full max-h-[85vh] flex flex-col">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-bold text-gray-800">Import reguł wykluczających</h3>
+        <button @click="showRuleImport=false" class="text-gray-400 hover:text-gray-600 transition">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="text-xs text-gray-500 mb-3">
+        Wklej JSON reguł z innego systemu (jedna reguła na linię albo tablica). Importowane są tylko reguły
+        <code class="text-gray-600">exclude_items</code> — ich warunki trafią do filtra. Nic się nie uruchomi,
+        dopóki nie klikniesz „Zastosuj filtr".
+      </p>
+      <textarea v-model="ruleImportText" rows="8" spellcheck="false"
+        placeholder='{"conditions":{...},"operations":[{"source":"all","operator":"exclude_items","arguments":null}]}'
+        class="w-full text-[11px] font-mono border border-gray-300 rounded px-2 py-2 resize-y focus:outline-none focus:border-blue-400"></textarea>
+
+      <div v-if="ruleImportResult" class="mt-3 flex-1 overflow-y-auto space-y-2 text-xs">
+        <div class="flex flex-wrap gap-x-4 gap-y-1 text-gray-600">
+          <span>Reguły: <strong>{{ ruleImportResult.ruleCount }}</strong></span>
+          <span class="text-green-600">Zaimportowane: <strong>{{ ruleImportResult.imported }}</strong></span>
+          <span v-if="ruleImportResult.skipped" class="text-gray-400">Pominięte: <strong>{{ ruleImportResult.skipped }}</strong></span>
+          <span v-if="ruleImportResult.imported > 1" class="text-gray-400">— połączone przez OR</span>
+          <span v-if="hasFilter && ruleImportResult.imported" class="text-blue-500">— dołączone do bieżącego filtra (OR)</span>
+        </div>
+        <div v-if="ruleImportResult.errors.length" class="rounded-lg border border-red-200 bg-red-50 p-2 space-y-0.5">
+          <p class="font-medium text-red-600">Błędy (blokują import):</p>
+          <p v-for="(e, i) in ruleImportResult.errors" :key="i" class="text-red-600">· {{ e }}</p>
+        </div>
+        <div v-if="ruleImportResult.unmapped.length" class="rounded-lg border border-amber-200 bg-amber-50 p-2 space-y-0.5">
+          <p class="font-medium text-amber-700">Pola do ręcznego dopasowania w filtrze:</p>
+          <p class="text-amber-700">{{ ruleImportResult.unmapped.join(', ') }}</p>
+        </div>
+        <div v-if="ruleImportResult.softMapped.length" class="text-gray-400">
+          <p>Dopasowane automatycznie (sprawdź): {{ ruleImportResult.softMapped.join(', ') }}</p>
+        </div>
+        <div v-if="ruleImportResult.warnings.length" class="rounded-lg border border-amber-200 bg-amber-50 p-2 space-y-0.5">
+          <p class="font-medium text-amber-700">Ostrzeżenia:</p>
+          <p v-for="(w, i) in ruleImportResult.warnings" :key="i" class="text-amber-700">· {{ w }}</p>
+        </div>
+        <div v-if="ruleImportResult.skippedReasons.length" class="text-gray-400 space-y-0.5">
+          <p v-for="(s, i) in ruleImportResult.skippedReasons" :key="i">· {{ s }}</p>
+        </div>
+      </div>
+
+      <div class="flex gap-2 justify-end mt-4 pt-3 border-t border-gray-100">
+        <button @click="showRuleImport=false"
+          class="px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition">Anuluj</button>
+        <button @click="applyRuleImport" :disabled="!ruleImportResult || !ruleImportResult.ok"
+          class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-40">
+          {{ hasFilter ? 'Dopisz do filtra' : 'Wstaw do filtra' }}
+        </button>
+      </div>
+    </div>
+  </div>
 </div><!-- end #app -->
 
 <!-- Worker source — type="text/plain" prevents execution; loaded as Blob URL at runtime
@@ -723,6 +828,7 @@ function _setField(obj,key,value){if(obj[key]===undefined)obj[key]=value;else if
 <script src="js/db.js"></script>
 <script src="js/filter.js"></script>
 <script src="js/export.js"></script>
+<script src="js/rule-import.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
